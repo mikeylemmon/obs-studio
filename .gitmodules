@@ -7,3 +7,12 @@
 [submodule "plugins/obs-websocket"]
 	path = plugins/obs-websocket
 	url = https://github.com/obsproject/obs-websocket.git
+[submodule "plugins/obs-shaderfilter"]
+	path = plugins/obs-shaderfilter
+	url = https://github.com/exeldro/obs-shaderfilter/
+[submodule "plugins/recursion-effect"]
+	path = plugins/recursion-effect
+	url = https://github.com/exeldro/obs-recursion-effect
+[submodule "plugins/source-clone"]
+	path = plugins/source-clone
+	url = https://github.com/exeldro/obs-source-clone

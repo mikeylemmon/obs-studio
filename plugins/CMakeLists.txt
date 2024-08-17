@@ -71,6 +71,7 @@ if(OBS_CMAKE_VERSION VERSION_GREATER_EQUAL 3.0.0)
     WITH_MESSAGE
   )
   add_obs_plugin(obs-text PLATFORMS WINDOWS)
+
   add_obs_plugin(obs-transitions)
   add_obs_plugin(
     obs-vst
@@ -90,6 +91,10 @@ if(OBS_CMAKE_VERSION VERSION_GREATER_EQUAL 3.0.0)
   add_obs_plugin(win-capture PLATFORMS WINDOWS)
   add_obs_plugin(win-dshow PLATFORMS WINDOWS)
   add_obs_plugin(win-wasapi PLATFORMS WINDOWS)
+
+  add_obs_plugin(obs-shaderfilter)
+  add_obs_plugin(recursion-effect)
+  add_obs_plugin(source-clone)
 
   return()
 endif()
@@ -186,3 +191,7 @@ add_subdirectory(rtmp-services)
 add_subdirectory(text-freetype2)
 add_subdirectory(aja)
 add_subdirectory(obs-webrtc)
+
+add_subdirectory(obs-shaderfilter)
+add_subdirectory(recursion-effect)
+add_subdirectory(source-clone)
