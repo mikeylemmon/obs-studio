@@ -9,7 +9,7 @@
 	url = https://github.com/obsproject/obs-websocket.git
 [submodule "plugins/obs-shaderfilter"]
 	path = plugins/obs-shaderfilter
-	url = https://github.com/exeldro/obs-shaderfilter/
+	url = git@github.com:mikeylemmon/obs-shaderfilter
 [submodule "plugins/recursion-effect"]
 	path = plugins/recursion-effect
 	url = https://github.com/exeldro/obs-recursion-effect
