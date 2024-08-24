@@ -464,12 +464,37 @@ OBSBasic::OBSBasic(QWidget *parent)
 			ResizePreview(ovi.base_width, ovi.base_height);
 
 		UpdateContextBarVisibility();
+		UpdatePreviewScrollbars();
 		dpi = devicePixelRatioF();
 	};
 	dpi = devicePixelRatioF();
 
 	connect(windowHandle(), &QWindow::screenChanged, displayResize);
 	connect(ui->preview, &OBSQTDisplay::DisplayResized, displayResize);
+
+	/* TODO: Move these into window-basic-preview */
+	/* Preview Scaling label */
+	connect(ui->preview, &OBSBasicPreview::scalingChanged,
+		ui->previewScalePercent,
+		&OBSPreviewScalingLabel::PreviewScaleChanged);
+
+	/* Preview Scaling dropdown */
+	connect(ui->preview, &OBSBasicPreview::scalingChanged,
+		ui->previewScalingMode,
+		&OBSPreviewScalingComboBox::PreviewScaleChanged);
+
+	connect(ui->preview, &OBSBasicPreview::fixedScalingChanged,
+		ui->previewScalingMode,
+		&OBSPreviewScalingComboBox::PreviewFixedScalingChanged);
+
+	connect(ui->previewScalingMode,
+		&OBSPreviewScalingComboBox::currentIndexChanged, this,
+		&OBSBasic::PreviewScalingModeChanged);
+
+	connect(this, &OBSBasic::CanvasResized, ui->previewScalingMode,
+		&OBSPreviewScalingComboBox::CanvasResized);
+	connect(this, &OBSBasic::OutputResized, ui->previewScalingMode,
+		&OBSPreviewScalingComboBox::OutputResized);
 
 	delete shortcutFilter;
 	shortcutFilter = CreateShortcutFilter();
@@ -1386,6 +1411,7 @@ retryScene:
 		ui->preview->SetScrollingOffset(scrollOffX, scrollOffY);
 	}
 	ui->preview->SetFixedScaling(fixedScaling);
+
 	emit ui->preview->DisplayResized();
 
 	if (vcamEnabled) {
@@ -1967,7 +1993,7 @@ void OBSBasic::InitOBSCallbacks()
 {
 	ProfileScope("OBSBasic::InitOBSCallbacks");
 
-	signalHandlers.reserve(signalHandlers.size() + 7);
+	signalHandlers.reserve(signalHandlers.size() + 9);
 	signalHandlers.emplace_back(obs_get_signal_handler(), "source_create",
 				    OBSBasic::SourceCreated, this);
 	signalHandlers.emplace_back(obs_get_signal_handler(), "source_remove",
@@ -1988,13 +2014,17 @@ void OBSBasic::InitOBSCallbacks()
 	signalHandlers.emplace_back(
 		obs_get_signal_handler(), "source_filter_add",
 		[](void *data, calldata_t *) {
-			static_cast<OBSBasic *>(data)->UpdateEditMenu();
+			QMetaObject::invokeMethod(static_cast<OBSBasic *>(data),
+						  "UpdateEditMenu",
+						  Qt::QueuedConnection);
 		},
 		this);
 	signalHandlers.emplace_back(
 		obs_get_signal_handler(), "source_filter_remove",
 		[](void *data, calldata_t *) {
-			static_cast<OBSBasic *>(data)->UpdateEditMenu();
+			QMetaObject::invokeMethod(static_cast<OBSBasic *>(data),
+						  "UpdateEditMenu",
+						  Qt::QueuedConnection);
 		},
 		this);
 }
@@ -2176,6 +2206,7 @@ void OBSBasic::OBSInit()
 
 	InitOBSCallbacks();
 	InitHotkeys();
+	ui->preview->Init();
 
 	/* hack to prevent elgato from loading its own QtNetwork that it tries
 	 * to ship with */
@@ -3760,14 +3791,7 @@ void OBSBasic::HideAudioControl()
 
 	if (!SourceMixerHidden(source)) {
 		SetSourceMixerHidden(source, true);
-
-		/* Due to a bug with QT 6.2.4, the version that's in the Ubuntu
-		* 22.04 ppa, hiding the audio mixer causes a crash, so defer to
-		* the next event loop to hide it. Doesn't seem to be a problem
-		* with newer versions of QT. */
-		QMetaObject::invokeMethod(this, "DeactivateAudioSource",
-					  Qt::QueuedConnection,
-					  Q_ARG(OBSSource, OBSSource(source)));
+		DeactivateAudioSource(source);
 	}
 }
 
@@ -4924,6 +4948,9 @@ int OBSBasic::ResetVideo()
 		obs_set_video_levels(sdr_white_level, hdr_nominal_peak_level);
 		OBSBasicStats::InitializeValues();
 		OBSProjector::UpdateMultiviewProjectors();
+
+		emit CanvasResized(ovi.base_width, ovi.base_height);
+		emit OutputResized(ovi.output_width, ovi.output_height);
 	}
 
 	return ret;
@@ -5013,8 +5040,10 @@ void OBSBasic::ResizePreview(uint32_t cx, uint32_t cy)
 	obs_get_video_info(&ovi);
 
 	if (isFixedScaling) {
-		ui->preview->ClampScrollingOffsets();
 		previewScale = ui->preview->GetScalingAmount();
+
+		ui->preview->ClampScrollingOffsets();
+
 		GetCenterPosFromFixedScale(
 			int(cx), int(cy),
 			targetSize.width() - PREVIEW_EDGE_SIZE * 2,
@@ -5030,6 +5059,8 @@ void OBSBasic::ResizePreview(uint32_t cx, uint32_t cy)
 					     PREVIEW_EDGE_SIZE * 2,
 				     previewX, previewY, previewScale);
 	}
+
+	ui->preview->SetScalingAmount(previewScale);
 
 	previewX += float(PREVIEW_EDGE_SIZE);
 	previewY += float(PREVIEW_EDGE_SIZE);
@@ -5572,13 +5603,7 @@ QList<QString> OBSBasic::GetProjectorMenuMonitorsFormatted()
 		QRect screenGeometry = screen->geometry();
 		qreal ratio = screen->devicePixelRatio();
 		QString name = "";
-#if defined(_WIN32) && QT_VERSION < QT_VERSION_CHECK(6, 4, 0)
-		QTextStream fullname(&name);
-		fullname << GetMonitorName(screen->name());
-		fullname << " (";
-		fullname << (i + 1);
-		fullname << ")";
-#elif defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__) || defined(_WIN32)
 		name = screen->name();
 #else
 		name = screen->model().simplified();
@@ -7677,26 +7702,11 @@ void OBSBasic::AutoRemux(QString input, bool no_show)
 	const char *format = config_get_string(
 		config, isSimpleMode ? "SimpleOutput" : "AdvOut", "RecFormat2");
 
-#if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(60, 5, 100)
-	const obs_encoder_t *audioEncoder =
-		obs_output_get_audio_encoder(outputHandler->fileOutput, 0);
-	const char *aCodecName = obs_encoder_get_codec(audioEncoder);
-	bool audio_is_pcm = strncmp(aCodecName, "pcm", 3) == 0;
-
-	/* FFmpeg <= 6.0 cannot remux AV1+PCM into any supported format. */
-	if (audio_is_pcm && strcmp(vCodecName, "av1") == 0)
-		return;
-#endif
-
 	/* Retain original container for fMP4/fMOV */
 	if (strncmp(format, "fragmented", 10) == 0) {
 		output += "remuxed." + suffix;
 	} else if (strcmp(vCodecName, "prores") == 0) {
 		output += "mov";
-#if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(60, 5, 100)
-	} else if (audio_is_pcm) {
-		output += "mov";
-#endif
 	} else {
 		output += "mp4";
 	}
@@ -9169,7 +9179,7 @@ void OBSBasic::on_actionHorizontalCenter_triggered()
 void OBSBasic::EnablePreviewDisplay(bool enable)
 {
 	obs_display_set_enabled(ui->preview->GetDisplay(), enable);
-	ui->preview->setVisible(enable);
+	ui->previewContainer->setVisible(enable);
 	ui->previewDisabledWidget->setVisible(!enable);
 }
 
@@ -9765,6 +9775,7 @@ void OBSBasic::on_actionScaleWindow_triggered()
 {
 	ui->preview->SetFixedScaling(false);
 	ui->preview->ResetScrollingOffset();
+
 	emit ui->preview->DisplayResized();
 }
 
@@ -9772,6 +9783,7 @@ void OBSBasic::on_actionScaleCanvas_triggered()
 {
 	ui->preview->SetFixedScaling(true);
 	ui->preview->SetScalingLevel(0);
+
 	emit ui->preview->DisplayResized();
 }
 
@@ -9785,8 +9797,8 @@ void OBSBasic::on_actionScaleOutput_triggered()
 	// log base ZOOM_SENSITIVITY of x = log(x) / log(ZOOM_SENSITIVITY)
 	int32_t approxScalingLevel =
 		int32_t(round(log(scalingAmount) / log(ZOOM_SENSITIVITY)));
-	ui->preview->SetScalingLevel(approxScalingLevel);
-	ui->preview->SetScalingAmount(scalingAmount);
+	ui->preview->SetScalingLevelAndAmount(approxScalingLevel,
+					      scalingAmount);
 	emit ui->preview->DisplayResized();
 }
 
@@ -11092,4 +11104,37 @@ void OBSBasic::OnEvent(enum obs_frontend_event event)
 {
 	if (api)
 		api->on_event(event);
+}
+
+void OBSBasic::UpdatePreviewScrollbars()
+{
+	if (!ui->preview->IsFixedScaling()) {
+		ui->previewXScrollBar->setRange(0, 0);
+		ui->previewYScrollBar->setRange(0, 0);
+	}
+}
+
+void OBSBasic::on_previewXScrollBar_valueChanged(int value)
+{
+	emit PreviewXScrollBarMoved(value);
+}
+
+void OBSBasic::on_previewYScrollBar_valueChanged(int value)
+{
+	emit PreviewYScrollBarMoved(value);
+}
+
+void OBSBasic::PreviewScalingModeChanged(int value)
+{
+	switch (value) {
+	case 0:
+		on_actionScaleWindow_triggered();
+		break;
+	case 1:
+		on_actionScaleCanvas_triggered();
+		break;
+	case 2:
+		on_actionScaleOutput_triggered();
+		break;
+	};
 }
